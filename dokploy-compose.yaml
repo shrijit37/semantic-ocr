@@ -1,0 +1,38 @@
+# semantic-ocr — raw-compose alternative for Dokploy dashboard paste.
+# Preferred path is a Dokploy Application (GitHub repo + Dockerfile, see README):
+# Applications get domains + auto-deploy with less manual wiring.
+# Use this file only if you want the service as Compose instead.
+#
+# Steps: Dokploy → project → Create → Compose → paste this file →
+# add domain ai.shrijit.tech:8000 (https, letsencrypt) → set API_TOKEN
+# in the compose environment UI → Deploy.
+# Requires https://github.com/shrijit37/semantic-ocr pushed (build context below).
+
+services:
+  api:
+    build:
+      context: https://github.com/shrijit37/semantic-ocr.git#main
+      dockerfile: Dockerfile
+    image: semantic-ocr:local
+    restart: unless-stopped
+    environment:
+      API_TOKEN: ${API_TOKEN:?API_TOKEN must be set in the Dokploy environment UI}
+      EMBED_MODEL: BAAI/bge-base-en-v1.5
+      OMP_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 2
+    deploy:
+      resources:
+        limits:
+          # Single-user burst budget: bge-base resident ~1GB + RapidOCR
+          # transient per page. Node has ~14GB free; this leaves headroom.
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.25"
+          memory: 1G
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
