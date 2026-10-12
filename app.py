@@ -151,6 +151,7 @@ def embed(req: EmbedRequest, _ok: bool = Depends(require_key)):
 
 
 _ocr_engine = None
+_ocr_slots = asyncio.Semaphore(int(os.environ.get("OCR_MAX_CONCURRENT", "2")))
 _ocr_error: str | None = None
 
 
@@ -201,9 +202,13 @@ async def ocr(
         from starlette.concurrency import run_in_threadpool
 
         try:
-            result, _elapse = await asyncio.wait_for(
-                run_in_threadpool(engine, tmp_path), timeout=OCR_TIMEOUT_S
-            )
+            # Max 2 concurrent inferences: each holds ~1GB transient on top of
+            # the resident ~1GB embed model. Unbounded parallel OCR OOMKills
+            # the container (exit 137, 2026-10-12). Extras wait, never crash.
+            async with _ocr_slots:
+                result, _elapse = await asyncio.wait_for(
+                    run_in_threadpool(engine, tmp_path), timeout=OCR_TIMEOUT_S
+                )
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="ocr timed out")
     finally:
