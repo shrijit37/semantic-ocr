@@ -189,6 +189,9 @@ async def ocr(
 
 
 async def _ocr_guarded(file: UploadFile):
+    # Per-stage timings (diagnostic, additive): splits decode / tmpfile /
+    # inference / parse so prod slowdowns can be attributed instead of guessed.
+    t_all = time.perf_counter()
     if not (file.content_type or "").startswith("image/") or (file.content_type or "").endswith("svg+xml"):
         raise HTTPException(status_code=415, detail="upload must be a raster image")
 
@@ -200,23 +203,29 @@ async def _ocr_guarded(file: UploadFile):
 
     from PIL import Image
 
+    t0 = time.perf_counter()
     try:
         img = Image.open(io.BytesIO(body))
         img.load()
     except Exception:
         raise HTTPException(status_code=422, detail="unreadable image")
+    t_decode = time.perf_counter() - t0
 
     engine = get_ocr_engine()
+    t0 = time.perf_counter()
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         img.convert("RGB").save(tmp.name, "PNG")
         tmp_path = tmp.name
+    t_tmpfile = time.perf_counter() - t0
     try:
         from starlette.concurrency import run_in_threadpool
 
         try:
+            t0 = time.perf_counter()
             result, _elapse = await asyncio.wait_for(
                 run_in_threadpool(engine, tmp_path), timeout=OCR_TIMEOUT_S
             )
+            t_infer = time.perf_counter() - t0
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="ocr timed out")
     finally:
@@ -232,11 +241,19 @@ async def _ocr_guarded(file: UploadFile):
         lines.append(txt)
         boxes.append([[round(float(x), 1), round(float(y), 1)] for x, y in box])
         confs.append(float(conf))
+    timings = {
+        "decode_s": round(t_decode, 3),
+        "tmpfile_s": round(t_tmpfile, 3),
+        "infer_s": round(t_infer, 3),
+        "total_s": round(time.perf_counter() - t_all, 3),
+    }
+    log.info("ocr timings=%s lines=%d", timings, len(lines))
     return {
         "text": "\n".join(lines),
         "confidence": round(sum(confs) / len(confs), 3) if confs else None,
         "lines": len(lines),
         "boxes": boxes,
+        "timings": timings,
     }
 
 
