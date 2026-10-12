@@ -184,8 +184,20 @@ async def ocr(
     # holds peak RAM (~1GB transient); guarding inference alone still lets N
     # concurrent uploads decode N images before queueing (OOM exit 137).
     # Extras wait at the gate, never crash. Tune via OCR_MAX_CONCURRENT.
+    t_enter = time.perf_counter()
     async with _ocr_slots:
-        return await _ocr_guarded(file)
+        queue_wait_s = time.perf_counter() - t_enter
+        if queue_wait_s > 1.0:
+            log.warning("ocr queue_wait_s=%.3f (slot held elsewhere)", queue_wait_s)
+        result = await _ocr_guarded(file)
+    # Gap diagnostic: wall-observed 60-100s with handler total ~1-2s implies
+    # time spent outside the handler body (body read / middleware / client).
+    timings = result.setdefault("timings", {})
+    timings["queue_wait_s"] = round(queue_wait_s, 3)
+    timings["server_time_s"] = round(
+        time.perf_counter() - t_enter, 3
+    )
+    return result
 
 
 async def _ocr_guarded(file: UploadFile):
