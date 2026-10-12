@@ -40,7 +40,10 @@ The container refuses to start without `API_TOKEN` (fail-closed).
   echoed back; vectors are always 768-dim `bge-base-en-v1.5`.
 - Header: `Authorization: Bearer <API_TOKEN>` (or `?api_key=` fallback).
 - OCR: `POST https://ai.shrijit.tech/ocr` as multipart `file` (png/jpg/webp/
-  tiff/bmp, ≤12 MB).
+  tiff/bmp, ≤12 MB). **Serialized server-side (one inference at a time):**
+  concurrent calls queue gracefully — a 6-shot burst drains in ~11 s. Do NOT
+  retry-storm it; a single slow response means your request is queued, not lost
+  (per-request timeout 180 s).
 
 ## Deploy (Dokploy — live since 2026-10-12)
 
