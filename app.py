@@ -162,6 +162,9 @@ def get_ocr_engine():
         try:
             from rapidocr_onnxruntime import RapidOCR
 
+            # NOTE: rapidocr 1.2.3 rejects engine kwargs (KeyError on unknown
+            # keys) — no per-engine thread control on this version. Plain
+            # constructor; do NOT pass kwargs here.
             _ocr_engine = RapidOCR()
             log.info("loaded rapidocr engine")
         except Exception as e:  # noqa: BLE001 — report, don't crash
