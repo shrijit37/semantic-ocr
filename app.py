@@ -177,6 +177,15 @@ async def ocr(
     file: UploadFile = File(...),
     _ok: bool = Depends(require_key),
 ):
+    # Slot covers the WHOLE request: body + PIL decode + inference. Each stage
+    # holds peak RAM (~1GB transient); guarding inference alone still lets N
+    # concurrent uploads decode N images before queueing (OOM exit 137).
+    # Extras wait at the gate, never crash. Tune via OCR_MAX_CONCURRENT.
+    async with _ocr_slots:
+        return await _ocr_guarded(file)
+
+
+async def _ocr_guarded(file: UploadFile):
     if not (file.content_type or "").startswith("image/") or (file.content_type or "").endswith("svg+xml"):
         raise HTTPException(status_code=415, detail="upload must be a raster image")
 
@@ -202,13 +211,9 @@ async def ocr(
         from starlette.concurrency import run_in_threadpool
 
         try:
-            # Max 2 concurrent inferences: each holds ~1GB transient on top of
-            # the resident ~1GB embed model. Unbounded parallel OCR OOMKills
-            # the container (exit 137, 2026-10-12). Extras wait, never crash.
-            async with _ocr_slots:
-                result, _elapse = await asyncio.wait_for(
-                    run_in_threadpool(engine, tmp_path), timeout=OCR_TIMEOUT_S
-                )
+            result, _elapse = await asyncio.wait_for(
+                run_in_threadpool(engine, tmp_path), timeout=OCR_TIMEOUT_S
+            )
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="ocr timed out")
     finally:
