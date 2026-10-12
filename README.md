@@ -34,7 +34,7 @@ The container refuses to start without `API_TOKEN` (fail-closed).
 
 ## RewindOS wiring
 
-- Base URL: `https://ai.shrijit.tech` (after deploy below)
+- Base URL: `https://ai.shrijit.tech`
 - Embeddings endpoint: `POST https://ai.shrijit.tech/api/embeddings`
   with `{"model": "<anything>", "prompt": "<text>"}` — the `model` name is
   echoed back; vectors are always 768-dim `bge-base-en-v1.5`.
@@ -42,24 +42,18 @@ The container refuses to start without `API_TOKEN` (fail-closed).
 - OCR: `POST https://ai.shrijit.tech/ocr` as multipart `file` (png/jpg/webp/
   tiff/bmp, ≤12 MB).
 
-## Deploy (Dokploy)
+## Deploy (Dokploy — live since 2026-10-12)
 
-No Dokploy MCP is mounted in the agent runtime, so this is a dashboard deploy:
+Deployed via MCP into the **AI Gateway** project as application `semantic-ocr`
+(`f9WsEwO9O5fPGW7lOqjUu`): source `shrijit37/semantic-ocr@main`, Dockerfile
+build, domain `ai.shrijit.tech` → `8000` (https, letsencrypt). Pushes to `main`
+auto-deploy (`autoDeploy=true`, trigger `push`). `API_TOKEN` lives in Dokploy
+env + Infisical (`platform`/`prod`, `SEMANTIC_OCR_API_TOKEN`) — never in this repo.
 
-1. `openssl rand -base64 32` → store as `SEMANTIC_OCR_API_TOKEN` in
-   self-hosted Infisical (`secrets.shrijit.tech`). Never commit it.
-2. Push this folder to `github.com/shrijit37/semantic-ocr` (`main`).
-3. Dokploy (`manage.shrijit.tech`) → **AI Gateway** project → Create →
-   **Application** → source `shrijit37/semantic-ocr`, build type Dockerfile.
-4. Domain: `ai.shrijit.tech` → container port `8000`, https, letsencrypt.
-5. Environment: `API_TOKEN=<token from step 1>`. Defaults cover the rest
-   (`EMBED_MODEL`, caps, `OMP_NUM_THREADS=2`).
-6. Deploy. First boot downloads ~450 MB of weights at build time
-   (pre-downloaded in Docker build); runtime needs no HuggingFace access
-   (`HF_HUB_OFFLINE=1`).
+Weights (~450 MB) are pre-downloaded in the Docker build; runtime needs no
+HuggingFace (`HF_HUB_OFFLINE=1`).
 
-Alternative: paste `dokploy-compose.yaml` as a raw Compose in the same project
-(requires the repo from step 2 for its build context).
+Alternative shape (not used): paste `dokploy-compose.yaml` as a raw Compose.
 
 Verify:
 
