@@ -57,21 +57,30 @@ token is involved
 
 ```bash
 uv tool install google-colab-cli          # Linux/macOS only
-colab new -s ocr-backfill                 # free CPU VM is enough (2 vCPU)
-colab upload -s ocr-backfill requirements-colab.txt requirements-colab.txt
-echo '!pip install -q -r requirements-colab.txt' | colab exec -s ocr-backfill
-# ... upload the batch, then:
+colab new -s ocr-backfill                 # free CPU VM is fine; GPU buys nothing (CPU onnxruntime)
+colab upload -s ocr-backfill requirements-colab.txt /content/requirements-colab.txt
+colab upload -s ocr-backfill colab_backfill.py /content/colab_backfill.py
+echo 'import os; os.environ.update(BACKFILL_IN="/content/images", BACKFILL_OUT="/content/output/results.jsonl")' | colab exec -s ocr-backfill
+echo '!pip install -q -r /content/requirements-colab.txt' | colab exec -s ocr-backfill
+# batch upload: tar it locally, upload ONE archive, extract on the VM
+# (Contents-API upload is one base64 PUT per file — never upload hundreds
+# of 12MB screenshots individually; keep the tarball modest, e.g. <100 MB,
+# or use `colab drivemount` for big batches)
+tar czf /tmp/batch.tgz -C /path/to/screenshots .
+colab upload -s ocr-backfill /tmp/batch.tgz /content/batch.tgz
+echo '!mkdir -p /content/images && tar xzf /content/batch.tgz -C /content/images' | colab exec -s ocr-backfill
 colab exec -s ocr-backfill -f colab_backfill.py
-colab download -s ocr-backfill output/results.jsonl ./results.jsonl
+colab download -s ocr-backfill /content/output/results.jsonl ./results.jsonl
 colab stop -s ocr-backfill
 ```
 
 `colab_backfill.py` emits one JSON line per image shaped like the live
 `/ocr` response (same 1.2.3 engine as prod), so consumers treat both
 sources uniformly. The run is resumable — rerun after a dead session and
-already-finished files are skipped. A GPU VM buys nothing (CPU onnxruntime
-either way); a free CPU VM sustains roughly the full 5s-cadence capture
-rate on its own.
+already-finished files are skipped. Per-image speed on a free 2-vCPU VM is
+about what prod had before the core raise — adequate for backlog, not a
+replacement for the interactive path. `colab auth` (ADC/OAuth) is an
+interactive, one-time step on the operator machine.
 
 ## Deploy (Dokploy — live since 2026-10-12)
 
