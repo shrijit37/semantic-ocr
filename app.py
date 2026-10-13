@@ -180,18 +180,26 @@ async def ocr(
     file: UploadFile = File(...),
     _ok: bool = Depends(require_key),
 ):
-    # Slot covers the WHOLE request: body + PIL decode + inference. Each stage
-    # holds peak RAM (~1GB transient); guarding inference alone still lets N
-    # concurrent uploads decode N images before queueing (OOM exit 137).
-    # Extras wait at the gate, never crash. Tune via OCR_MAX_CONCURRENT.
+    # Slot covers decode + tmpfile + inference only (~1GB transient each).
+    # The upload body is read BEFORE the slot: holding the slot through slow
+    # client uploads serialized multi-MB screenshots behind the inference
+    # gate (prod 2026-10-13: ~79s slot occupancy per real screenshot, waits
+    # 16->170s with slots mostly busy at only ~150% CPU). Body read costs
+    # ~12MB RAM per in-flight request; N concurrent uploads fit the 6GiB
+    # limit. Extras wait at the gate, never crash. Tune via
+    # OCR_MAX_CONCURRENT.
+    if not (file.content_type or "").startswith("image/") or (file.content_type or "").endswith("svg+xml"):
+        raise HTTPException(status_code=415, detail="upload must be a raster image")
+    body = await file.read()
+    if len(body) > MAX_OCR_BYTES:
+        raise HTTPException(status_code=413, detail=f"image exceeds {MAX_OCR_BYTES} bytes")
+
     t_enter = time.perf_counter()
     async with _ocr_slots:
         queue_wait_s = time.perf_counter() - t_enter
         if queue_wait_s > 1.0:
             log.warning("ocr queue_wait_s=%.3f (slot held elsewhere)", queue_wait_s)
-        result = await _ocr_guarded(file)
-    # Gap diagnostic: wall-observed 60-100s with handler total ~1-2s implies
-    # time spent outside the handler body (body read / middleware / client).
+        result = await _ocr_guarded_body(body)
     timings = result.setdefault("timings", {})
     timings["queue_wait_s"] = round(queue_wait_s, 3)
     timings["server_time_s"] = round(
@@ -200,18 +208,10 @@ async def ocr(
     return result
 
 
-async def _ocr_guarded(file: UploadFile):
+async def _ocr_guarded_body(body: bytes):
     # Per-stage timings (diagnostic, additive): splits decode / tmpfile /
-    # inference / parse so prod slowdowns can be attributed instead of guessed.
+    # inference so prod slowdowns can be attributed instead of guessed.
     t_all = time.perf_counter()
-    if not (file.content_type or "").startswith("image/") or (file.content_type or "").endswith("svg+xml"):
-        raise HTTPException(status_code=415, detail="upload must be a raster image")
-
-    body = await file.read()
-    if len(body) > MAX_OCR_BYTES:
-        raise HTTPException(
-            status_code=413, detail=f"image exceeds {MAX_OCR_BYTES} bytes"
-        )
 
     from PIL import Image
 
@@ -221,6 +221,12 @@ async def _ocr_guarded(file: UploadFile):
         img.load()
     except Exception:
         raise HTTPException(status_code=422, detail="unreadable image")
+    # Native 4K/Retina screenshots multiply decode/tmpfile/inference work per
+    # pixel with no OCR-quality gain at OCR-relevant sizes; cap the long edge
+    # (0 disables).
+    max_side = int(os.environ.get("OCR_MAX_SIDE", "2400"))
+    if max_side and max(img.size) > max_side:
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
     t_decode = time.perf_counter() - t0
 
     engine = get_ocr_engine()
@@ -259,7 +265,10 @@ async def _ocr_guarded(file: UploadFile):
         "infer_s": round(t_infer, 3),
         "total_s": round(time.perf_counter() - t_all, 3),
     }
-    log.info("ocr timings=%s lines=%d", timings, len(lines))
+    # WARNING, not INFO: uvicorn's default config suppresses app-logger INFO,
+    # which hid real per-stage costs during the 2026-10-13 investigation.
+    # Drop to INFO once stage costs are tuned.
+    log.warning("ocr timings=%s lines=%d", timings, len(lines))
     return {
         "text": "\n".join(lines),
         "confidence": round(sum(confs) / len(confs), 3) if confs else None,
