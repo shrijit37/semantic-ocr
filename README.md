@@ -40,12 +40,16 @@ The container refuses to start without `API_TOKEN` (fail-closed).
   echoed back; vectors are always 768-dim `bge-base-en-v1.5`.
 - Header: `Authorization: Bearer <API_TOKEN>` (or `?api_key=` fallback).
 - OCR: `POST https://ai.shrijit.tech/ocr` as multipart `file` (png/jpg/webp/
-  tiff/bmp, ≤12 MB). **Up to 3 inferences run concurrently** (`OCR_MAX_CONCURRENT`
-  default 3); extras queue gracefully. Sustained 5s-cadence capture needs real
-  cores: with the container capped at 2 CPUs the queue never drains (prod
-  2026-10-13: waits 30–92s); it now runs 3.5 CPUs / 3 slots. Do NOT retry-storm
-  it; a single slow response means your request is queued, not lost
-  (per-request timeout 180 s).
+  tiff/bmp, ≤12 MB). **Up to 3 inferences run concurrently**
+  (`OCR_MAX_CONCURRENT=3`, pinned in Dokploy env — the code default is
+  overridden by env); uploads are read before the slot, so slow clients do
+  not serialize behind inference. Images above a 2400px long edge are
+  downscaled server-side (`OCR_MAX_SIDE`, 0 disables). Throughput is
+  CPU-supply-bound: a real dense screenshot costs ~20–25 CPU-seconds, so
+  this 4-core shared node sustains roughly 4–8 shots/min — the 5s-cadence
+  (12/min) target needs client-side downscaling and/or the Colab backfill
+  lane below. Do NOT retry-storm it; a single slow response means your
+  request is queued, not lost (per-request timeout 180 s).
 
 ## Offline backfill (Google Colab — local engine, batch only)
 
