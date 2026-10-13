@@ -151,7 +151,7 @@ def embed(req: EmbedRequest, _ok: bool = Depends(require_key)):
 
 
 _ocr_engine = None
-_ocr_slots = asyncio.Semaphore(int(os.environ.get("OCR_MAX_CONCURRENT", "2")))
+_ocr_slots = asyncio.Semaphore(int(os.environ.get("OCR_MAX_CONCURRENT", "3")))
 _ocr_error: str | None = None
 
 

@@ -40,9 +40,11 @@ The container refuses to start without `API_TOKEN` (fail-closed).
   echoed back; vectors are always 768-dim `bge-base-en-v1.5`.
 - Header: `Authorization: Bearer <API_TOKEN>` (or `?api_key=` fallback).
 - OCR: `POST https://ai.shrijit.tech/ocr` as multipart `file` (png/jpg/webp/
-  tiff/bmp, ≤12 MB). **Serialized server-side (one inference at a time):**
-  concurrent calls queue gracefully — a 6-shot burst drains in ~11 s. Do NOT
-  retry-storm it; a single slow response means your request is queued, not lost
+  tiff/bmp, ≤12 MB). **Up to 3 inferences run concurrently** (`OCR_MAX_CONCURRENT`
+  default 3); extras queue gracefully. Sustained 5s-cadence capture needs real
+  cores: with the container capped at 2 CPUs the queue never drains (prod
+  2026-10-13: waits 30–92s); it now runs 3.5 CPUs / 3 slots. Do NOT retry-storm
+  it; a single slow response means your request is queued, not lost
   (per-request timeout 180 s).
 
 ## Deploy (Dokploy — live since 2026-10-12)
