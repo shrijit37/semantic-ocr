@@ -47,6 +47,32 @@ The container refuses to start without `API_TOKEN` (fail-closed).
   it; a single slow response means your request is queued, not lost
   (per-request timeout 180 s).
 
+## Offline backfill (Google Colab — local engine, batch only)
+
+The live service stays the only interactive path. For **backlogs** where
+minutes-late results are fine, run RapidOCR **locally on a Colab VM** —
+compute happens on the VM, nothing POSTs to `ai.shrijit.tech`, and no API
+token is involved
+([google-colab-cli](https://github.com/googlecolab/google-colab-cli)):
+
+```bash
+uv tool install google-colab-cli          # Linux/macOS only
+colab new -s ocr-backfill                 # free CPU VM is enough (2 vCPU)
+colab upload -s ocr-backfill requirements-colab.txt requirements-colab.txt
+echo '!pip install -q -r requirements-colab.txt' | colab exec -s ocr-backfill
+# ... upload the batch, then:
+colab exec -s ocr-backfill -f colab_backfill.py
+colab download -s ocr-backfill output/results.jsonl ./results.jsonl
+colab stop -s ocr-backfill
+```
+
+`colab_backfill.py` emits one JSON line per image shaped like the live
+`/ocr` response (same 1.2.3 engine as prod), so consumers treat both
+sources uniformly. The run is resumable — rerun after a dead session and
+already-finished files are skipped. A GPU VM buys nothing (CPU onnxruntime
+either way); a free CPU VM sustains roughly the full 5s-cadence capture
+rate on its own.
+
 ## Deploy (Dokploy — live since 2026-10-12)
 
 Deployed via MCP into the **AI Gateway** project as application `semantic-ocr`
